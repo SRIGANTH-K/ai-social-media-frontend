@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import "./App.css";
 
 /*
@@ -11,7 +11,7 @@ import "./App.css";
 const API_URL =
   "https://9bd3e5wwxb.execute-api.us-east-1.amazonaws.com/generate";
 
-// New image upload API
+// Image upload API
 const UPLOAD_API_URL =
   "https://9bd3e5wwxb.execute-api.us-east-1.amazonaws.com/upload";
 
@@ -51,10 +51,7 @@ function App() {
   const [platform, setPlatform] = useState("LinkedIn");
   const [tone, setTone] = useState("Professional");
 
-  /*
-   * This is automatically populated after the image
-   * is successfully uploaded to S3.
-   */
+  // Internal image reference used by the backend
   const [imageKey, setImageKey] = useState("");
   const [uploadedFileName, setUploadedFileName] = useState("");
 
@@ -74,27 +71,10 @@ function App() {
    * ==========================================================
    * HANDLE IMAGE UPLOAD
    * ==========================================================
-   *
-   * Flow:
-   *
-   * React
-   *   ↓
-   * POST /upload
-   *   ↓
-   * API Gateway
-   *   ↓
-   * Lambda: ai-social-media-upload
-   *   ↓
-   * Presigned S3 URL
-   *   ↓
-   * React PUT image
-   *   ↓
-   * S3
-   *
    */
 
   async function handleImageUpload(
-    event: React.ChangeEvent<HTMLInputElement>
+    event: ChangeEvent<HTMLInputElement>
   ) {
     const file = event.target.files?.[0];
 
@@ -105,24 +85,14 @@ function App() {
     setError("");
     setUploadProgress(0);
 
-    /*
-     * --------------------------------------------------------
-     * Validate file type
-     * --------------------------------------------------------
-     */
-
+    // Validate file type
     if (!file.type.startsWith("image/")) {
       setError("Please select an image file.");
       event.target.value = "";
       return;
     }
 
-    /*
-     * --------------------------------------------------------
-     * Validate file size
-     * --------------------------------------------------------
-     */
-
+    // Validate file size
     const maxSize = 5 * 1024 * 1024;
 
     if (file.size > maxSize) {
@@ -137,7 +107,7 @@ function App() {
       /*
        * ------------------------------------------------------
        * STEP 1
-       * Ask Lambda for a presigned S3 upload URL
+       * Request an upload URL from the upload API
        * ------------------------------------------------------
        */
 
@@ -153,9 +123,7 @@ function App() {
       });
 
       /*
-       * Try to parse the API Gateway response.
-       *
-       * Lambda proxy integration normally returns:
+       * API Gateway may return:
        *
        * {
        *   statusCode: 200,
@@ -178,21 +146,20 @@ function App() {
       if (!presignedResponse.ok) {
         throw new Error(
           uploadData?.key ||
-            "Failed to generate the S3 upload URL."
+            "Failed to prepare the image upload."
         );
       }
 
       if (!uploadData.uploadUrl || !uploadData.key) {
         throw new Error(
-          "The upload API did not return a valid S3 upload URL."
+          "The upload service did not return a valid upload URL."
         );
       }
 
       /*
        * ------------------------------------------------------
        * STEP 2
-       * Upload the actual image directly to S3
-       * using the presigned URL.
+       * Upload the actual image using the generated URL
        * ------------------------------------------------------
        */
 
@@ -206,14 +173,14 @@ function App() {
 
       if (!uploadResponse.ok) {
         throw new Error(
-          `S3 upload failed with status ${uploadResponse.status}.`
+          `Image upload failed with status ${uploadResponse.status}.`
         );
       }
 
       /*
        * ------------------------------------------------------
        * STEP 3
-       * Save the generated S3 key.
+       * Store the generated image key internally
        * ------------------------------------------------------
        */
 
@@ -222,7 +189,6 @@ function App() {
       setUploadProgress(100);
 
       console.log("Image uploaded successfully.");
-      console.log("S3 key:", uploadData.key);
     } catch (err) {
       console.error("Image upload error:", err);
 
@@ -238,9 +204,7 @@ function App() {
     } finally {
       setUploading(false);
 
-      /*
-       * Allows the user to select the same file again.
-       */
+      // Allow the same file to be selected again
       event.target.value = "";
     }
   }
@@ -267,23 +231,13 @@ function App() {
     setHashtags([]);
     setCopied(false);
 
-    /*
-     * User must provide either:
-     *
-     * Topic
-     * OR
-     * Image
-     */
-
+    // Topic OR image is required
     if (!topic.trim() && !imageKey.trim()) {
       setError("Please enter a topic or upload an image.");
       return;
     }
 
-    /*
-     * Don't allow generation while image is still uploading.
-     */
-
+    // Don't generate while image is uploading
     if (uploading) {
       setError("Please wait until the image upload is complete.");
       return;
@@ -294,7 +248,7 @@ function App() {
     try {
       /*
        * ------------------------------------------------------
-       * Build request for existing /generate API
+       * Build request for the generation API
        * ------------------------------------------------------
        */
 
@@ -312,12 +266,7 @@ function App() {
         requestBody.topic = topic.trim();
       }
 
-      /*
-       * The user NEVER types the S3 key.
-       *
-       * It was automatically generated by the upload Lambda.
-       */
-
+      // Image key is generated automatically after upload
       if (imageKey.trim()) {
         requestBody.imageKey = imageKey.trim();
       }
@@ -442,6 +391,7 @@ function App() {
 
   return (
     <div className="app">
+
       {/* =====================================================
           HEADER
           ===================================================== */}
@@ -452,6 +402,7 @@ function App() {
 
           <div>
             <h1>AI Social Media Generator</h1>
+
             <p>
               Create professional social media content with AI
             </p>
@@ -471,6 +422,7 @@ function App() {
           ===================================================== */}
 
       <main className="container">
+
         {/* ===================================================
             HERO
             =================================================== */}
@@ -496,14 +448,17 @@ function App() {
             =================================================== */}
 
         <div className="workspace">
+
           {/* =================================================
               GENERATOR CARD
               ================================================= */}
 
           <section className="card generator-card">
+
             <div className="card-header">
               <div>
                 <h3>Create your post</h3>
+
                 <p>
                   Tell the AI what you want to post about.
                 </p>
@@ -519,6 +474,7 @@ function App() {
             <div className="field">
               <label htmlFor="topic">
                 Topic
+
                 <span className="optional">
                   Optional if image is provided
                 </span>
@@ -612,6 +568,7 @@ function App() {
             <div className="field">
               <label>
                 Image
+
                 <span className="optional">
                   Optional
                 </span>
@@ -648,12 +605,15 @@ function App() {
                   )}
                 </button>
               ) : (
+
                 /* =================================================
                    IMAGE UPLOADED
                    ================================================= */
 
                 <div className="uploaded-image-box">
+
                   <div className="uploaded-image-info">
+
                     <span className="uploaded-check">
                       ✓
                     </span>
@@ -663,10 +623,12 @@ function App() {
                         {uploadedFileName}
                       </strong>
 
+                      {/* Amazon S3 text removed */}
                       <small>
-                        Uploaded successfully to Amazon S3
+                        Uploaded successfully
                       </small>
                     </div>
+
                   </div>
 
                   <button
@@ -677,6 +639,7 @@ function App() {
                   >
                     Remove
                   </button>
+
                 </div>
               )}
 
@@ -684,15 +647,8 @@ function App() {
                 JPG, PNG, WEBP or GIF • Maximum 5 MB
               </small>
 
-              {/* =================================================
-                  S3 STATUS
-                  ================================================= */}
+              {/* S3 status message intentionally removed */}
 
-              {imageKey && (
-                <small className="s3-upload-status">
-                  ✓ S3 image ready for AI processing
-                </small>
-              )}
             </div>
 
             {/* =================================================
@@ -712,6 +668,7 @@ function App() {
                 ================================================= */}
 
             <div className="actions">
+
               <button
                 className="generate-button"
                 onClick={generatePost}
@@ -734,7 +691,9 @@ function App() {
               >
                 Clear
               </button>
+
             </div>
+
           </section>
 
           {/* =================================================
@@ -742,7 +701,9 @@ function App() {
               ================================================= */}
 
           <section className="card result-card">
+
             <div className="card-header">
+
               <div>
                 <h3>Generated content</h3>
 
@@ -760,6 +721,7 @@ function App() {
                   {copied ? "✓ Copied" : "Copy"}
                 </button>
               )}
+
             </div>
 
             {/* =================================================
@@ -768,6 +730,7 @@ function App() {
 
             {!content && !loading && (
               <div className="empty-state">
+
                 <div className="empty-icon">
                   ✦
                 </div>
@@ -782,6 +745,7 @@ function App() {
                   then click
                   <strong> Generate Post</strong>.
                 </p>
+
               </div>
             )}
 
@@ -791,6 +755,7 @@ function App() {
 
             {loading && (
               <div className="loading-state">
+
                 <div className="large-spinner"></div>
 
                 <h4>
@@ -801,6 +766,7 @@ function App() {
                   Amazon Nova 2 Lite is generating
                   your content.
                 </p>
+
               </div>
             )}
 
@@ -810,16 +776,23 @@ function App() {
 
             {content && !loading && (
               <div className="result-content">
-                <div className="post-meta">
-                  <span>{platform}</span>
 
-                  <span>{tone}</span>
+                <div className="post-meta">
+
+                  <span>
+                    {platform}
+                  </span>
+
+                  <span>
+                    {tone}
+                  </span>
 
                   {imageKey && (
                     <span>
                       Image included
                     </span>
                   )}
+
                 </div>
 
                 <div className="post-text">
@@ -832,9 +805,13 @@ function App() {
 
                 {hashtags.length > 0 && (
                   <div className="hashtags-section">
-                    <h4>Hashtags</h4>
+
+                    <h4>
+                      Hashtags
+                    </h4>
 
                     <div className="hashtags">
+
                       {hashtags.map(
                         (hashtag, index) => (
                           <span
@@ -845,6 +822,7 @@ function App() {
                           </span>
                         )
                       )}
+
                     </div>
                   </div>
                 )}
@@ -861,9 +839,12 @@ function App() {
                     ? "✓ Copied to clipboard"
                     : "📋 Copy Post & Hashtags"}
                 </button>
+
               </div>
             )}
+
           </section>
+
         </div>
 
         {/* =====================================================
@@ -871,32 +852,53 @@ function App() {
             ===================================================== */}
 
         <section className="architecture">
-          <p>Powered by</p>
+
+          <p>
+            Powered by
+          </p>
 
           <div className="architecture-items">
-            <span>React</span>
 
-            <span>→</span>
+            <span>
+              React
+            </span>
 
-            <span>AWS Amplify</span>
+            <span>
+              →
+            </span>
 
-            <span>→</span>
+            <span>
+              AWS Amplify
+            </span>
 
-            <span>Amazon S3</span>
+            <span>
+              →
+            </span>
 
-            <span>→</span>
+            <span>
+              API Gateway
+            </span>
 
-            <span>API Gateway</span>
+            <span>
+              →
+            </span>
 
-            <span>→</span>
+            <span>
+              AWS Lambda
+            </span>
 
-            <span>AWS Lambda</span>
+            <span>
+              →
+            </span>
 
-            <span>→</span>
+            <span>
+              Amazon Bedrock
+            </span>
 
-            <span>Amazon Bedrock</span>
           </div>
+
         </section>
+
       </main>
 
       {/* =====================================================
@@ -908,6 +910,7 @@ function App() {
           AI Social Media Generator • Built with AWS & React
         </p>
       </footer>
+
     </div>
   );
 }
