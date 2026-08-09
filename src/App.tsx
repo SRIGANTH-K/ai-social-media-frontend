@@ -250,7 +250,7 @@ function App() {
 
   return (
     <Authenticator>
-      {({ signOut, user }) => (
+      {({ signOut }) => (
         <div className="app">
           {/* Header */}
           <header className="header">
