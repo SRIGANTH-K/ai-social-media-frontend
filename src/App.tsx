@@ -42,6 +42,97 @@ type UploadResponse = {
 
 /*
  * ============================================================
+ * IMAGE CONVERSION
+ * ============================================================
+ *
+ * Converts the selected image into a REAL PNG before uploading.
+ *
+ * This fixes the problem where a file may be named:
+ *
+ *     example.png
+ *
+ * but its actual binary content is JPEG.
+ *
+ * The backend / AI model will always receive:
+ *
+ *     Content-Type: image/png
+ *     File contents: actual PNG
+ *
+ * ============================================================
+ */
+
+async function convertImageToPng(file: File): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+
+    const objectUrl = URL.createObjectURL(file);
+
+    image.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+
+        const context = canvas.getContext("2d");
+
+        if (!context) {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error("Unable to process the selected image."));
+          return;
+        }
+
+        /*
+         * Draw the original image onto the canvas.
+         * Canvas output will be encoded as a real PNG.
+         */
+        context.drawImage(
+          image,
+          0,
+          0,
+          image.naturalWidth,
+          image.naturalHeight
+        );
+
+        canvas.toBlob(
+          (blob) => {
+            URL.revokeObjectURL(objectUrl);
+
+            if (!blob) {
+              reject(new Error("Unable to convert the image to PNG."));
+              return;
+            }
+
+            resolve(blob);
+          },
+          "image/png"
+        );
+      } catch (error) {
+        URL.revokeObjectURL(objectUrl);
+
+        reject(
+          error instanceof Error
+            ? error
+            : new Error("Unable to convert the image to PNG.")
+        );
+      }
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(
+        new Error(
+          "The selected image could not be read. Please choose another image."
+        )
+      );
+    };
+
+    image.src = objectUrl;
+  });
+}
+
+/*
+ * ============================================================
  * APP
  * ============================================================
  */
@@ -85,14 +176,23 @@ function App() {
     setError("");
     setUploadProgress(0);
 
-    // Validate file type
+    /*
+     * ----------------------------------------------------------
+     * STEP 1
+     * Validate selected file
+     * ----------------------------------------------------------
+     */
+
     if (!file.type.startsWith("image/")) {
       setError("Please select an image file.");
       event.target.value = "";
       return;
     }
 
-    // Validate file size
+    /*
+     * Maximum original file size:
+     * 5 MB
+     */
     const maxSize = 5 * 1024 * 1024;
 
     if (file.size > maxSize) {
@@ -105,10 +205,68 @@ function App() {
 
     try {
       /*
-       * ------------------------------------------------------
-       * STEP 1
-       * Request an upload URL from the upload API
-       * ------------------------------------------------------
+       * --------------------------------------------------------
+       * STEP 2
+       * Convert the selected image into a REAL PNG
+       * --------------------------------------------------------
+       *
+       * This is the important fix.
+       *
+       * Even if the original file is:
+       *
+       * JPG
+       * JPEG
+       * WEBP
+       * GIF
+       * or a wrongly named PNG
+       *
+       * the resulting Blob is guaranteed to be PNG data.
+       */
+
+      setUploadProgress(20);
+
+      const pngBlob = await convertImageToPng(file);
+
+      /*
+       * Check converted PNG size as well.
+       */
+
+      if (pngBlob.size > maxSize) {
+        throw new Error(
+          "The converted PNG image is larger than 5 MB. Please choose a smaller image."
+        );
+      }
+
+      setUploadProgress(40);
+
+      /*
+       * --------------------------------------------------------
+       * STEP 3
+       * Create a PNG filename
+       * --------------------------------------------------------
+       */
+
+      const originalNameWithoutExtension = file.name.replace(
+        /\.[^/.]+$/,
+        ""
+      );
+
+      const pngFileName = `${originalNameWithoutExtension}.png`;
+
+      /*
+       * --------------------------------------------------------
+       * STEP 4
+       * Request a presigned upload URL
+       * --------------------------------------------------------
+       *
+       * IMPORTANT:
+       *
+       * We always tell the upload Lambda:
+       *
+       *     fileName: *.png
+       *     contentType: image/png
+       *
+       * because the actual file is now a real PNG.
        */
 
       const presignedResponse = await fetch(UPLOAD_API_URL, {
@@ -117,8 +275,8 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          fileName: file.name,
-          contentType: file.type,
+          fileName: pngFileName,
+          contentType: "image/png",
         }),
       });
 
@@ -156,19 +314,21 @@ function App() {
         );
       }
 
+      setUploadProgress(60);
+
       /*
-       * ------------------------------------------------------
-       * STEP 2
-       * Upload the actual image using the generated URL
-       * ------------------------------------------------------
+       * --------------------------------------------------------
+       * STEP 5
+       * Upload the REAL PNG to the presigned URL
+       * --------------------------------------------------------
        */
 
       const uploadResponse = await fetch(uploadData.uploadUrl, {
         method: "PUT",
         headers: {
-          "Content-Type": file.type,
+          "Content-Type": "image/png",
         },
-        body: file,
+        body: pngBlob,
       });
 
       if (!uploadResponse.ok) {
@@ -177,18 +337,37 @@ function App() {
         );
       }
 
+      setUploadProgress(90);
+
       /*
-       * ------------------------------------------------------
-       * STEP 3
+       * --------------------------------------------------------
+       * STEP 6
        * Store the generated image key internally
-       * ------------------------------------------------------
+       * --------------------------------------------------------
+       *
+       * The key is NOT displayed to the user.
        */
 
       setImageKey(uploadData.key);
+
+      /*
+       * Keep showing the user's original filename in the UI.
+       *
+       * Example:
+       *
+       * 1000339559.png
+       *
+       * even though internally we uploaded a converted PNG.
+       */
+
       setUploadedFileName(file.name);
+
       setUploadProgress(100);
 
       console.log("Image uploaded successfully.");
+      console.log("Original file:", file.name);
+      console.log("Uploaded format: image/png");
+      console.log("Uploaded S3 key:", uploadData.key);
     } catch (err) {
       console.error("Image upload error:", err);
 
@@ -204,7 +383,10 @@ function App() {
     } finally {
       setUploading(false);
 
-      // Allow the same file to be selected again
+      /*
+       * Allow the same file to be selected again.
+       */
+
       event.target.value = "";
     }
   }
@@ -231,13 +413,19 @@ function App() {
     setHashtags([]);
     setCopied(false);
 
-    // Topic OR image is required
+    /*
+     * Topic OR image is required.
+     */
+
     if (!topic.trim() && !imageKey.trim()) {
       setError("Please enter a topic or upload an image.");
       return;
     }
 
-    // Don't generate while image is uploading
+    /*
+     * Don't generate while image is uploading.
+     */
+
     if (uploading) {
       setError("Please wait until the image upload is complete.");
       return;
@@ -247,9 +435,9 @@ function App() {
 
     try {
       /*
-       * ------------------------------------------------------
+       * --------------------------------------------------------
        * Build request for the generation API
-       * ------------------------------------------------------
+       * --------------------------------------------------------
        */
 
       const requestBody: {
@@ -266,7 +454,10 @@ function App() {
         requestBody.topic = topic.trim();
       }
 
-      // Image key is generated automatically after upload
+      /*
+       * Image key is generated automatically after upload.
+       */
+
       if (imageKey.trim()) {
         requestBody.imageKey = imageKey.trim();
       }
@@ -277,9 +468,9 @@ function App() {
       );
 
       /*
-       * ------------------------------------------------------
+       * --------------------------------------------------------
        * Call AI generation API
-       * ------------------------------------------------------
+       * --------------------------------------------------------
        */
 
       const response = await fetch(API_URL, {
@@ -299,9 +490,9 @@ function App() {
       }
 
       /*
-       * ------------------------------------------------------
+       * --------------------------------------------------------
        * Display generated content
-       * ------------------------------------------------------
+       * --------------------------------------------------------
        */
 
       setContent(data.content || "");
@@ -351,6 +542,7 @@ function App() {
     setImageKey("");
     setUploadedFileName("");
     setUploadProgress(0);
+    setError("");
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -623,7 +815,6 @@ function App() {
                         {uploadedFileName}
                       </strong>
 
-                      {/* Amazon S3 text removed */}
                       <small>
                         Uploaded successfully
                       </small>
@@ -646,8 +837,6 @@ function App() {
               <small>
                 JPG, PNG, WEBP or GIF • Maximum 5 MB
               </small>
-
-              {/* S3 status message intentionally removed */}
 
             </div>
 
