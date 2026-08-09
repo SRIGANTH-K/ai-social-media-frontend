@@ -251,6 +251,207 @@ select:focus {
   font-size: 11px;
 }
 
+/* =========================
+   IMAGE UPLOAD
+   ========================= */
+
+.image-upload-area {
+  width: 100%;
+}
+
+/* Main upload button */
+
+.upload-button {
+  width: 100%;
+  min-height: 54px;
+  padding: 14px 18px;
+  border: 2px dashed #7c3aed;
+  border-radius: 12px;
+  background: #f5f3ff;
+  color: #6d28d9;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.upload-button:hover:not(:disabled) {
+  background: #ede9fe;
+  border-color: #6d28d9;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(124, 58, 237, 0.12);
+}
+
+.upload-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.upload-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Hidden file input */
+
+.file-input {
+  display: none;
+}
+
+/* Upload helper text */
+
+.upload-help {
+  display: block;
+  margin-top: 7px;
+  color: #9095a3;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Selected/uploaded image */
+
+.uploaded-image-box {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  background: #f9fafb;
+}
+
+/* File information */
+
+.uploaded-image-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.uploaded-check {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #dcfce7;
+  color: #16a34a;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* File name */
+
+.uploaded-image-info strong {
+  display: block;
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #303648;
+  font-size: 13px;
+}
+
+/* File details */
+
+.uploaded-image-info small {
+  display: block;
+  margin-top: 3px;
+  color: #858b99;
+  font-size: 11px;
+}
+
+/* Remove image */
+
+.remove-image-button {
+  flex-shrink: 0;
+  padding: 8px 13px;
+  border: none;
+  border-radius: 8px;
+  background: #fee2e2;
+  color: #dc2626;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.remove-image-button:hover:not(:disabled) {
+  background: #fecaca;
+  transform: translateY(-1px);
+}
+
+.remove-image-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Upload progress/status */
+
+.s3-upload-status {
+  display: block;
+  margin-top: 7px;
+  color: #16a34a;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Uploading state */
+
+.uploading-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: #6d4aff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Small purple spinner for upload */
+
+.upload-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ddd6fe;
+  border-top-color: #7c3aed;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* Image preview */
+
+.image-preview {
+  width: 100%;
+  margin-top: 12px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #e6e8ef;
+  background: #f8f9fb;
+}
+
+.image-preview img {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+}
+
 /* Error */
 
 .error-box {
@@ -601,5 +802,17 @@ footer {
 
   .architecture-items {
     line-height: 1.8;
+  }
+
+  .uploaded-image-box {
+    align-items: flex-start;
+  }
+
+  .uploaded-image-info strong {
+    max-width: 150px;
+  }
+
+  .remove-image-button {
+    padding: 7px 10px;
   }
 }
