@@ -7,7 +7,7 @@ import "./App.css";
  * ============================================================
  */
 
-// Existing AI post generation API
+// AI post generation API
 const API_URL =
   "https://9bd3e5wwxb.execute-api.us-east-1.amazonaws.com/generate";
 
@@ -45,18 +45,18 @@ type UploadResponse = {
  * IMAGE CONVERSION
  * ============================================================
  *
- * Converts the selected image into a REAL PNG before uploading.
+ * Converts every selected image into a REAL PNG before upload.
  *
- * This fixes the problem where a file may be named:
+ * This prevents errors where:
  *
- *     example.png
+ * example.png
  *
- * but its actual binary content is JPEG.
+ * actually contains JPEG binary data.
  *
- * The backend / AI model will always receive:
+ * The backend always receives:
  *
- *     Content-Type: image/png
- *     File contents: actual PNG
+ * Content-Type: image/png
+ * Actual binary data: PNG
  *
  * ============================================================
  */
@@ -82,10 +82,6 @@ async function convertImageToPng(file: File): Promise<Blob> {
           return;
         }
 
-        /*
-         * Draw the original image onto the canvas.
-         * Canvas output will be encoded as a real PNG.
-         */
         context.drawImage(
           image,
           0,
@@ -120,6 +116,7 @@ async function convertImageToPng(file: File): Promise<Blob> {
 
     image.onerror = () => {
       URL.revokeObjectURL(objectUrl);
+
       reject(
         new Error(
           "The selected image could not be read. Please choose another image."
@@ -142,9 +139,14 @@ function App() {
   const [platform, setPlatform] = useState("LinkedIn");
   const [tone, setTone] = useState("Professional");
 
-  // Internal image reference used by the backend
+  // Internal reference used by the backend
   const [imageKey, setImageKey] = useState("");
+
+  // Original filename shown to user
   const [uploadedFileName, setUploadedFileName] = useState("");
+
+  // Local browser preview
+  const [imagePreview, setImagePreview] = useState("");
 
   const [content, setContent] = useState("");
   const [hashtags, setHashtags] = useState<string[]>([]);
@@ -177,10 +179,7 @@ function App() {
     setUploadProgress(0);
 
     /*
-     * ----------------------------------------------------------
-     * STEP 1
-     * Validate selected file
-     * ----------------------------------------------------------
+     * Validate file
      */
 
     if (!file.type.startsWith("image/")) {
@@ -190,9 +189,9 @@ function App() {
     }
 
     /*
-     * Maximum original file size:
-     * 5 MB
+     * Maximum original size: 5 MB
      */
+
     const maxSize = 5 * 1024 * 1024;
 
     if (file.size > maxSize) {
@@ -201,34 +200,33 @@ function App() {
       return;
     }
 
+    /*
+     * Create local preview immediately
+     */
+
+    if (imagePreview) {
+      URL.revokeObjectURL(imagePreview);
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setImagePreview(previewUrl);
+
     setUploading(true);
 
     try {
       /*
        * --------------------------------------------------------
-       * STEP 2
-       * Convert the selected image into a REAL PNG
+       * STEP 1
+       * Convert selected image to REAL PNG
        * --------------------------------------------------------
-       *
-       * This is the important fix.
-       *
-       * Even if the original file is:
-       *
-       * JPG
-       * JPEG
-       * WEBP
-       * GIF
-       * or a wrongly named PNG
-       *
-       * the resulting Blob is guaranteed to be PNG data.
        */
 
-      setUploadProgress(20);
+      setUploadProgress(15);
 
       const pngBlob = await convertImageToPng(file);
 
       /*
-       * Check converted PNG size as well.
+       * Check converted PNG size
        */
 
       if (pngBlob.size > maxSize) {
@@ -237,12 +235,12 @@ function App() {
         );
       }
 
-      setUploadProgress(40);
+      setUploadProgress(35);
 
       /*
        * --------------------------------------------------------
-       * STEP 3
-       * Create a PNG filename
+       * STEP 2
+       * Create PNG filename
        * --------------------------------------------------------
        */
 
@@ -255,18 +253,9 @@ function App() {
 
       /*
        * --------------------------------------------------------
-       * STEP 4
-       * Request a presigned upload URL
+       * STEP 3
+       * Request presigned upload URL
        * --------------------------------------------------------
-       *
-       * IMPORTANT:
-       *
-       * We always tell the upload Lambda:
-       *
-       *     fileName: *.png
-       *     contentType: image/png
-       *
-       * because the actual file is now a real PNG.
        */
 
       const presignedResponse = await fetch(UPLOAD_API_URL, {
@@ -280,21 +269,23 @@ function App() {
         }),
       });
 
-      /*
-       * API Gateway may return:
-       *
-       * {
-       *   statusCode: 200,
-       *   body: "{\"uploadUrl\":\"...\",\"key\":\"...\"}"
-       * }
-       */
-
       const rawResponse = await presignedResponse.json();
 
-      let uploadData: UploadResponse;
+      let uploadData: UploadResponse & {
+        error?: string;
+        message?: string;
+      };
 
       if (typeof rawResponse.body === "string") {
-        uploadData = JSON.parse(rawResponse.body);
+        try {
+          uploadData = JSON.parse(rawResponse.body);
+        } catch {
+          uploadData = {
+            uploadUrl: "",
+            key: "",
+            error: "Invalid response from upload service.",
+          };
+        }
       } else if (rawResponse.body) {
         uploadData = rawResponse.body;
       } else {
@@ -303,7 +294,8 @@ function App() {
 
       if (!presignedResponse.ok) {
         throw new Error(
-          uploadData?.key ||
+          uploadData?.error ||
+            uploadData?.message ||
             "Failed to prepare the image upload."
         );
       }
@@ -318,8 +310,8 @@ function App() {
 
       /*
        * --------------------------------------------------------
-       * STEP 5
-       * Upload the REAL PNG to the presigned URL
+       * STEP 4
+       * Upload REAL PNG
        * --------------------------------------------------------
        */
 
@@ -341,33 +333,16 @@ function App() {
 
       /*
        * --------------------------------------------------------
-       * STEP 6
-       * Store the generated image key internally
+       * STEP 5
+       * Store internal image key
        * --------------------------------------------------------
-       *
-       * The key is NOT displayed to the user.
        */
 
       setImageKey(uploadData.key);
-
-      /*
-       * Keep showing the user's original filename in the UI.
-       *
-       * Example:
-       *
-       * 1000339559.png
-       *
-       * even though internally we uploaded a converted PNG.
-       */
-
       setUploadedFileName(file.name);
-
       setUploadProgress(100);
 
       console.log("Image uploaded successfully.");
-      console.log("Original file:", file.name);
-      console.log("Uploaded format: image/png");
-      console.log("Uploaded S3 key:", uploadData.key);
     } catch (err) {
       console.error("Image upload error:", err);
 
@@ -380,11 +355,17 @@ function App() {
       setImageKey("");
       setUploadedFileName("");
       setUploadProgress(0);
+
+      if (imagePreview) {
+        URL.revokeObjectURL(imagePreview);
+      }
+
+      setImagePreview("");
     } finally {
       setUploading(false);
 
       /*
-       * Allow the same file to be selected again.
+       * Allow same file to be selected again.
        */
 
       event.target.value = "";
@@ -423,7 +404,7 @@ function App() {
     }
 
     /*
-     * Don't generate while image is uploading.
+     * Don't generate while upload is running.
      */
 
     if (uploading) {
@@ -435,9 +416,7 @@ function App() {
 
     try {
       /*
-       * --------------------------------------------------------
-       * Build request for the generation API
-       * --------------------------------------------------------
+       * Build request
        */
 
       const requestBody: {
@@ -454,23 +433,12 @@ function App() {
         requestBody.topic = topic.trim();
       }
 
-      /*
-       * Image key is generated automatically after upload.
-       */
-
       if (imageKey.trim()) {
         requestBody.imageKey = imageKey.trim();
       }
 
-      console.log(
-        "Sending request to API Gateway:",
-        requestBody
-      );
-
       /*
-       * --------------------------------------------------------
-       * Call AI generation API
-       * --------------------------------------------------------
+       * Call generation API
        */
 
       const response = await fetch(API_URL, {
@@ -481,19 +449,30 @@ function App() {
         body: JSON.stringify(requestBody),
       });
 
-      const data: ApiResponse = await response.json();
+      const rawResponse = await response.json();
+
+      let data: ApiResponse;
+
+      if (typeof rawResponse.body === "string") {
+        try {
+          data = JSON.parse(rawResponse.body);
+        } catch {
+          data = {
+            success: false,
+            error: "Invalid response received from the AI service.",
+          };
+        }
+      } else if (rawResponse.body) {
+        data = rawResponse.body;
+      } else {
+        data = rawResponse;
+      }
 
       if (!response.ok || !data.success) {
         throw new Error(
           data.error || "Failed to generate the post."
         );
       }
-
-      /*
-       * --------------------------------------------------------
-       * Display generated content
-       * --------------------------------------------------------
-       */
 
       setContent(data.content || "");
       setHashtags(data.hashtags || []);
@@ -544,6 +523,12 @@ function App() {
     setUploadProgress(0);
     setError("");
 
+    if (imagePreview) {
+      URL.revokeObjectURL(imagePreview);
+    }
+
+    setImagePreview("");
+
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -570,6 +555,12 @@ function App() {
     setError("");
     setCopied(false);
 
+    if (imagePreview) {
+      URL.revokeObjectURL(imagePreview);
+    }
+
+    setImagePreview("");
+
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -584,79 +575,142 @@ function App() {
   return (
     <div className="app">
 
-      {/* =====================================================
+      {/* ======================================================
+          BACKGROUND
+          ====================================================== */}
+
+      <div className="background-effects">
+        <div className="ambient ambient-one"></div>
+        <div className="ambient ambient-two"></div>
+        <div className="ambient ambient-three"></div>
+
+        <div className="orb orb-one"></div>
+        <div className="orb orb-two"></div>
+        <div className="orb orb-three"></div>
+
+        <div className="grid-overlay"></div>
+      </div>
+
+      {/* ======================================================
           HEADER
-          ===================================================== */}
+          ====================================================== */}
 
       <header className="header">
+
         <div className="brand">
-          <div className="brand-icon">✦</div>
 
-          <div>
-            <h1>AI Social Media Generator</h1>
+          <div className="brand-icon">
+            <span>✦</span>
+          </div>
 
-            <p>
-              Create professional social media content with AI
-            </p>
+          <div className="brand-text">
+            <h1>AI Social</h1>
+            <span>Media Generator</span>
+          </div>
+
+        </div>
+
+        <div className="header-center">
+          <div className="nav-pill">
+            <span className="nav-active">Create</span>
+            <span>AI Studio</span>
+            <span>About</span>
           </div>
         </div>
 
         <div className="header-right">
+
           <div className="status">
             <span className="status-dot"></span>
-            AI Powered
+            <span>AI Powered</span>
           </div>
+
         </div>
+
       </header>
 
-      {/* =====================================================
+      {/* ======================================================
           MAIN
-          ===================================================== */}
+          ====================================================== */}
 
       <main className="container">
 
-        {/* ===================================================
+        {/* ====================================================
             HERO
-            =================================================== */}
+            ==================================================== */}
 
         <section className="hero">
-          <span className="hero-badge">
-            AWS • Amazon Bedrock
-          </span>
+
+          <div className="hero-badge">
+            <span className="badge-glow"></span>
+            AI CONTENT ENGINE
+          </div>
 
           <h2>
             Turn your ideas into
-            <span> engaging posts.</span>
+            <span className="hero-gradient">
+              {" "}content that stands out.
+            </span>
           </h2>
 
           <p>
-            Generate polished social media content using
-            Amazon Nova 2 Lite.
+            Create polished social media posts with intelligent
+            AI generation, image understanding and platform-aware
+            writing.
           </p>
+
+          <div className="hero-orbit">
+
+            <div className="orbit-ring orbit-ring-one"></div>
+            <div className="orbit-ring orbit-ring-two"></div>
+
+            <div className="orbit-core">
+              <span>✦</span>
+            </div>
+
+            <div className="orbit-particle particle-one"></div>
+            <div className="orbit-particle particle-two"></div>
+            <div className="orbit-particle particle-three"></div>
+
+          </div>
+
         </section>
 
-        {/* ===================================================
+        {/* ====================================================
             WORKSPACE
-            =================================================== */}
+            ==================================================== */}
 
-        <div className="workspace">
+        <section className="workspace">
 
-          {/* =================================================
-              GENERATOR CARD
-              ================================================= */}
+          {/* ==================================================
+              CREATE PANEL
+              ================================================== */}
 
-          <section className="card generator-card">
+          <section className="glass-card generator-card">
+
+            <div className="card-glow"></div>
 
             <div className="card-header">
+
               <div>
-                <h3>Create your post</h3>
+
+                <div className="section-label">
+                  <span>01</span>
+                  CREATE
+                </div>
+
+                <h3>Build your post</h3>
 
                 <p>
-                  Tell the AI what you want to post about.
+                  Give the AI an idea and let it do the rest.
                 </p>
+
               </div>
 
-              <div className="sparkle">✦</div>
+              <div className="card-icon">
+                ✦
+              </div>
+
             </div>
 
             {/* =================================================
@@ -664,161 +718,217 @@ function App() {
                 ================================================= */}
 
             <div className="field">
+
               <label htmlFor="topic">
-                Topic
+                <span>What do you want to say?</span>
 
                 <span className="optional">
-                  Optional if image is provided
+                  Optional with image
                 </span>
               </label>
 
-              <textarea
-                id="topic"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="Example: I completed my Networking Essentials certification..."
-                rows={5}
-              />
+              <div className="input-shell textarea-shell">
+
+                <textarea
+                  id="topic"
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  placeholder="Tell the AI what you want to post about..."
+                  rows={5}
+                  disabled={loading}
+                />
+
+                <div className="input-corner">
+                  ✦
+                </div>
+
+              </div>
+
             </div>
 
             {/* =================================================
-                PLATFORM
+                PLATFORM + TONE
                 ================================================= */}
 
-            <div className="field">
-              <label htmlFor="platform">
-                Platform
-              </label>
+            <div className="select-grid">
 
-              <select
-                id="platform"
-                value={platform}
-                onChange={(e) =>
-                  setPlatform(e.target.value)
-                }
-              >
-                <option value="LinkedIn">
-                  LinkedIn
-                </option>
+              <div className="field">
 
-                <option value="Instagram">
-                  Instagram
-                </option>
+                <label htmlFor="platform">
+                  Platform
+                </label>
 
-                <option value="Facebook">
-                  Facebook
-                </option>
+                <div className="input-shell">
 
-                <option value="X">
-                  X / Twitter
-                </option>
-              </select>
+                  <select
+                    id="platform"
+                    value={platform}
+                    onChange={(e) => setPlatform(e.target.value)}
+                    disabled={loading}
+                  >
+                    <option value="LinkedIn">
+                      LinkedIn
+                    </option>
+
+                    <option value="Instagram">
+                      Instagram
+                    </option>
+
+                    <option value="Facebook">
+                      Facebook
+                    </option>
+
+                    <option value="X">
+                      X / Twitter
+                    </option>
+                  </select>
+
+                  <span className="select-arrow">
+                    ↓
+                  </span>
+
+                </div>
+
+              </div>
+
+              <div className="field">
+
+                <label htmlFor="tone">
+                  Tone
+                </label>
+
+                <div className="input-shell">
+
+                  <select
+                    id="tone"
+                    value={tone}
+                    onChange={(e) => setTone(e.target.value)}
+                    disabled={loading}
+                  >
+                    <option value="Professional">
+                      Professional
+                    </option>
+
+                    <option value="Friendly">
+                      Friendly
+                    </option>
+
+                    <option value="Casual">
+                      Casual
+                    </option>
+
+                    <option value="Inspirational">
+                      Inspirational
+                    </option>
+
+                    <option value="Confident">
+                      Confident
+                    </option>
+                  </select>
+
+                  <span className="select-arrow">
+                    ↓
+                  </span>
+
+                </div>
+
+              </div>
+
             </div>
 
             {/* =================================================
-                TONE
+                IMAGE
                 ================================================= */}
 
             <div className="field">
-              <label htmlFor="tone">
-                Tone
-              </label>
 
-              <select
-                id="tone"
-                value={tone}
-                onChange={(e) =>
-                  setTone(e.target.value)
-                }
-              >
-                <option value="Professional">
-                  Professional
-                </option>
-
-                <option value="Friendly">
-                  Friendly
-                </option>
-
-                <option value="Casual">
-                  Casual
-                </option>
-
-                <option value="Inspirational">
-                  Inspirational
-                </option>
-
-                <option value="Confident">
-                  Confident
-                </option>
-              </select>
-            </div>
-
-            {/* =================================================
-                IMAGE UPLOAD
-                ================================================= */}
-
-            <div className="field">
               <label>
-                Image
+
+                <span>Visual reference</span>
 
                 <span className="optional">
                   Optional
                 </span>
-              </label>
 
-              {/* Hidden file input */}
+              </label>
 
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/jpeg,image/png,image/webp,image/gif"
                 onChange={handleImageUpload}
-                style={{ display: "none" }}
+                className="file-input"
               />
 
-              {/* =================================================
-                  NO IMAGE SELECTED
-                  ================================================= */}
-
               {!uploadedFileName ? (
+
                 <button
                   type="button"
-                  className="upload-button"
+                  className="upload-zone"
                   onClick={openFilePicker}
                   disabled={uploading || loading}
                 >
-                  {uploading ? (
-                    <>
-                      <span className="spinner"></span>
-                      Uploading {uploadProgress}%
-                    </>
-                  ) : (
-                    <>📷 Upload Image</>
-                  )}
-                </button>
-              ) : (
 
-                /* =================================================
-                   IMAGE UPLOADED
-                   ================================================= */
+                  <div className="upload-icon">
+                    {uploading ? (
+                      <span className="upload-spinner"></span>
+                    ) : (
+                      "↑"
+                    )}
+                  </div>
+
+                  <div className="upload-copy">
+
+                    <strong>
+                      {uploading
+                        ? `Uploading ${uploadProgress}%`
+                        : "Drop your image here"}
+                    </strong>
+
+                    <span>
+                      {uploading
+                        ? "Preparing your visual..."
+                        : "or click to browse from your device"}
+                    </span>
+
+                  </div>
+
+                  {!uploading && (
+                    <span className="upload-plus">
+                      +
+                    </span>
+                  )}
+
+                </button>
+
+              ) : (
 
                 <div className="uploaded-image-box">
 
+                  <div className="uploaded-preview">
+
+                    {imagePreview && (
+                      <img
+                        src={imagePreview}
+                        alt="Selected preview"
+                      />
+                    )}
+
+                    <div className="preview-check">
+                      ✓
+                    </div>
+
+                  </div>
+
                   <div className="uploaded-image-info">
 
-                    <span className="uploaded-check">
-                      ✓
+                    <strong>
+                      {uploadedFileName}
+                    </strong>
+
+                    <span>
+                      Image ready
                     </span>
-
-                    <div>
-                      <strong>
-                        {uploadedFileName}
-                      </strong>
-
-                      <small>
-                        Uploaded successfully
-                      </small>
-                    </div>
 
                   </div>
 
@@ -827,15 +937,17 @@ function App() {
                     className="remove-image-button"
                     onClick={removeImage}
                     disabled={loading}
+                    aria-label="Remove image"
                   >
-                    Remove
+                    ×
                   </button>
 
                 </div>
+
               )}
 
-              <small>
-                JPG, PNG, WEBP or GIF • Maximum 5 MB
+              <small className="upload-help">
+                JPG, PNG, WEBP or GIF · Maximum 5 MB
               </small>
 
             </div>
@@ -845,15 +957,23 @@ function App() {
                 ================================================= */}
 
             {error && (
-              <div className="error-box">
-                <span>⚠</span>
 
-                <p>{error}</p>
+              <div className="error-box">
+
+                <div className="error-icon">
+                  !
+                </div>
+
+                <p>
+                  {error}
+                </p>
+
               </div>
+
             )}
 
             {/* =================================================
-                ACTION BUTTONS
+                ACTIONS
                 ================================================= */}
 
             <div className="actions">
@@ -863,14 +983,28 @@ function App() {
                 onClick={generatePost}
                 disabled={loading || uploading}
               >
+
+                <span className="button-shine"></span>
+
                 {loading ? (
+
                   <>
                     <span className="spinner"></span>
-                    Generating...
+                    Creating magic...
                   </>
+
                 ) : (
-                  <>✦ Generate Post</>
+
+                  <>
+                    <span>✦</span>
+                    Generate Post
+                    <span className="button-arrow">
+                      →
+                    </span>
+                  </>
+
                 )}
+
               </button>
 
               <button
@@ -883,80 +1017,155 @@ function App() {
 
             </div>
 
+            {/* =================================================
+                TECH FOOTER
+                ================================================= */}
+
+            <div className="mini-tech">
+
+              <span>
+                <i></i>
+                AI Engine
+              </span>
+
+              <span>
+                <i></i>
+                Image Vision
+              </span>
+
+              <span>
+                <i></i>
+                Secure Processing
+              </span>
+
+            </div>
+
           </section>
 
-          {/* =================================================
-              RESULT CARD
-              ================================================= */}
+          {/* ==================================================
+              RESULT PANEL
+              ================================================== */}
 
-          <section className="card result-card">
+          <section className="glass-card result-card">
+
+            <div className="result-background-orb"></div>
 
             <div className="card-header">
 
               <div>
-                <h3>Generated content</h3>
+
+                <div className="section-label">
+                  <span>02</span>
+                  AI OUTPUT
+                </div>
+
+                <h3>Your content</h3>
 
                 <p>
-                  Your AI-generated social media post
-                  will appear here.
+                  Your generated post will appear here.
                 </p>
+
               </div>
 
               {content && (
+
                 <button
                   className="copy-button"
                   onClick={copyPost}
                 >
                   {copied ? "✓ Copied" : "Copy"}
                 </button>
+
               )}
 
             </div>
 
             {/* =================================================
-                EMPTY STATE
+                EMPTY
                 ================================================= */}
 
             {!content && !loading && (
+
               <div className="empty-state">
 
-                <div className="empty-icon">
-                  ✦
+                <div className="empty-visual">
+
+                  <div className="empty-orbit orbit-a"></div>
+                  <div className="empty-orbit orbit-b"></div>
+
+                  <div className="empty-core">
+                    ✦
+                  </div>
+
+                  <span className="floating-star star-a">
+                    ✦
+                  </span>
+
+                  <span className="floating-star star-b">
+                    ·
+                  </span>
+
+                  <span className="floating-star star-c">
+                    ✦
+                  </span>
+
                 </div>
 
                 <h4>
-                  Your post will appear here
+                  Your next post starts here.
                 </h4>
 
                 <p>
-                  Enter a topic, upload an image if
-                  needed, choose your platform and tone,
-                  then click
-                  <strong> Generate Post</strong>.
+                  Add a topic or image, select your platform
+                  and tone, then let the AI create something
+                  worth sharing.
                 </p>
 
+                <div className="empty-hint">
+                  <span>✦</span>
+                  Ready when you are
+                </div>
+
               </div>
+
             )}
 
             {/* =================================================
-                LOADING STATE
+                LOADING
                 ================================================= */}
 
             {loading && (
+
               <div className="loading-state">
 
-                <div className="large-spinner"></div>
+                <div className="ai-loader">
+
+                  <div className="loader-ring ring-one"></div>
+                  <div className="loader-ring ring-two"></div>
+
+                  <div className="loader-core">
+                    ✦
+                  </div>
+
+                </div>
 
                 <h4>
-                  Creating your post...
+                  Creating your post
                 </h4>
 
                 <p>
-                  Amazon Nova 2 Lite is generating
-                  your content.
+                  Your AI content engine is working on
+                  something polished for you.
                 </p>
 
+                <div className="loading-dots">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+
               </div>
+
             )}
 
             {/* =================================================
@@ -964,11 +1173,13 @@ function App() {
                 ================================================= */}
 
             {content && !loading && (
+
               <div className="result-content">
 
                 <div className="post-meta">
 
-                  <span>
+                  <span className="meta-platform">
+                    <i></i>
                     {platform}
                   </span>
 
@@ -984,104 +1195,138 @@ function App() {
 
                 </div>
 
-                <div className="post-text">
-                  {content}
-                </div>
+                <div className="post-output">
 
-                {/* =================================================
-                    HASHTAGS
-                    ================================================= */}
+                  <div className="output-top">
 
-                {hashtags.length > 0 && (
-                  <div className="hashtags-section">
+                    <div className="output-avatar">
+                      ✦
+                    </div>
 
-                    <h4>
-                      Hashtags
-                    </h4>
+                    <div>
 
-                    <div className="hashtags">
+                      <strong>
+                        AI Social Media
+                      </strong>
 
-                      {hashtags.map(
-                        (hashtag, index) => (
-                          <span
-                            key={`${hashtag}-${index}`}
-                            className="hashtag"
-                          >
-                            {hashtag}
-                          </span>
-                        )
-                      )}
+                      <span>
+                        Generated content
+                      </span>
 
                     </div>
-                  </div>
-                )}
 
-                {/* =================================================
-                    COPY BUTTON
-                    ================================================= */}
+                    <div className="output-more">
+                      •••
+                    </div>
+
+                  </div>
+
+                  <div className="post-text">
+                    {content}
+                  </div>
+
+                  {hashtags.length > 0 && (
+
+                    <div className="hashtags-section">
+
+                      <h4>
+                        Suggested tags
+                      </h4>
+
+                      <div className="hashtags">
+
+                        {hashtags.map(
+                          (hashtag, index) => (
+
+                            <span
+                              key={`${hashtag}-${index}`}
+                              className="hashtag"
+                            >
+                              {hashtag}
+                            </span>
+
+                          )
+                        )}
+
+                      </div>
+
+                    </div>
+
+                  )}
+
+                </div>
 
                 <button
                   className="copy-full-button"
                   onClick={copyPost}
                 >
-                  {copied
-                    ? "✓ Copied to clipboard"
-                    : "📋 Copy Post & Hashtags"}
+
+                  <span>
+                    {copied
+                      ? "✓ Copied to clipboard"
+                      : "Copy Post & Hashtags"}
+                  </span>
+
+                  {!copied && (
+                    <span>
+                      ⧉
+                    </span>
+                  )}
+
                 </button>
 
               </div>
+
             )}
 
           </section>
 
-        </div>
+        </section>
 
-        {/* =====================================================
+        {/* ====================================================
             ARCHITECTURE
-            ===================================================== */}
+            ==================================================== */}
 
         <section className="architecture">
 
-          <p>
-            Powered by
-          </p>
+          <div className="architecture-line"></div>
+
+          <div className="architecture-title">
+            POWERED BY
+          </div>
 
           <div className="architecture-items">
 
-            <span>
+            <span className="tech-chip">
+              <b>R</b>
               React
             </span>
 
-            <span>
+            <span className="architecture-arrow">
               →
             </span>
 
-            <span>
-              AWS Amplify
+            <span className="tech-chip">
+              <b>A</b>
+              AWS
             </span>
 
-            <span>
+            <span className="architecture-arrow">
               →
             </span>
 
-            <span>
-              API Gateway
+            <span className="tech-chip">
+              <b>λ</b>
+              Lambda
             </span>
 
-            <span>
+            <span className="architecture-arrow">
               →
             </span>
 
-            <span>
-              AWS Lambda
-            </span>
-
-            <span>
-              →
-            </span>
-
-            <span>
-              Amazon Bedrock
+            <span className="tech-chip">
+              <b>✦</b>
+              Bedrock
             </span>
 
           </div>
@@ -1090,14 +1335,30 @@ function App() {
 
       </main>
 
-      {/* =====================================================
+      {/* ======================================================
           FOOTER
-          ===================================================== */}
+          ====================================================== */}
 
       <footer>
-        <p>
-          AI Social Media Generator • Built with AWS & React
-        </p>
+
+        <div className="footer-inner">
+
+          <div>
+            <span className="footer-logo">
+              ✦
+            </span>
+
+            <strong>
+              AI Social Media Generator
+            </strong>
+          </div>
+
+          <span>
+            Built with React + AWS
+          </span>
+
+        </div>
+
       </footer>
 
     </div>
